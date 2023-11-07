@@ -3,8 +3,8 @@ import openpyxl
 import pandas as pd
 import os
 
-version = "1.1.1"
-print(f"Developed by xymoget. Version {version}\nhttps://www.fiverr.com/xymoget")
+version = "1.2.0"
+print(f"Developed by xymoget. Version {version}\nxymoget@gmail.com")
 
 def extract_text(pdf_file: str):
     reader = PyPDF2.PdfReader(pdf_file) #create a reader of pdf file object
@@ -14,9 +14,11 @@ def extract_text(pdf_file: str):
     return text
 
 def search_keywords(keyword: str, text: str):
-    text = text.lower().replace("-", " ")
-    keyword = keyword.lower().replace("-", " ")
-    return text.count(keyword) #search for keyword in the text
+    special_symbols = [".", "\n", ":", "-", ";", ",", "!", "?", "^"]
+    for symbol in special_symbols:
+        text = (" "+text).lower().replace(symbol, " ")
+        keyword = keyword.lower().replace(symbol, " ")
+    return text.count(f" {keyword} ") #search for keyword in the text
 
 def load_keys(xlsx_file: str):
     wb = openpyxl.load_workbook(xlsx_file) #load excel table
@@ -38,7 +40,6 @@ def as_text(value):
     if value is None:
         return ""
     return str(value)
-
 pdf_files = []
 keys_path = input("Path to .xlsx file with keywords: ")
 save_path = input("Path to .xlsx file to save analysis: ")
@@ -55,23 +56,30 @@ keywords = load_keys(keys_path)
 data = {
     "keyword": keywords
 }
+all_keywords = []
 for file in pdf_files: #loop over all pdf files provided
     print(f"Processing file: {file}")
     short_file = file.split("\\")[-1]
+    keywords_found = []
     for key in keywords: #search keywords in every file
         print(f"Searching keyword: {key}")
         text = extract_text(file)
         result = search_keywords(key, text)
+        if result > 0:
+            keywords_found.append(key)
         if data.get(short_file, None) != None: #save results to dictionary
             data[short_file].append(result)
         else:
             data[short_file] = [result]
+    data[short_file].append("; ".join(keywords_found))
+    all_keywords.extend(keywords_found)
 
-data["keyword"].append("total")
-data["keyword"].append("total single keyword")
+data["keyword"].append("Keywords found")
+data["keyword"].append("Total")
+data["keyword"].append("Total per single keyword")
 data["conclusion"] = []
 print("Summing up...")
-for i in range(len(data["keyword"])-2): #find files where keywords were used
+for i in range(len(data["keyword"])-3): #find files where keywords were used
     counter = 0
     files = []
     for key in data.keys():
@@ -83,13 +91,21 @@ for i in range(len(data["keyword"])-2): #find files where keywords were used
     conclusion = f"{str(counter)} file(s): {'; '.join(files)}"
     data["conclusion"].append(conclusion)
 
-data["conclusion"] += ["None", "None"]
+print(data)
 
 for key in data.keys(): #calculate total amount of keywords used in file
     if key == "keyword" or key == "conclusion":
         continue
-    data[key].append(sum(data[key]))
-    data[key].append(len([i for i in data[key][:-1] if i > 0]))
+    data[key].append(sum(data[key][:-1]))
+    data[key].append(len([i for i in data[key][:-2] if i > 0]))
+
+unique_keywords = list(set(all_keywords))
+data["conclusion"] += [f'{len(unique_keywords)} keywords found: {"; ".join(unique_keywords)}', sum([data[i][-2] for i in data if i not in ["keyword", "conclusion"]]), sum([data[i][-1] for i in data if i not in ["keyword", "conclusion"]])]
+
+for key in data:
+    temp = data[key][-3]
+    data[key][-3] = data[key][-1]
+    data[key][-1] = temp
 
 df = pd.DataFrame(data) #turn dictionary into dataframe object
 df.to_excel(save_path, index=False) #save to excel file
