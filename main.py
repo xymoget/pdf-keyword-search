@@ -1,30 +1,22 @@
-import PyPDF2  # import packages
-import openpyxl
-import pandas as pd
 import os
-import xlsxwriter
 
-version = "1.3.0"
-print(f"Developed by xymoget. Version {version}\nxymoget@gmail.com")
+# For next imports you will need to install 5 packages:
+# pip install openpyxl
+# pip install pandas
+# pip install pdfminer
+# pip install pdfminer.six
+# pip install xlsxwriter
 
+import openpyxl 
+import pandas as pd 
+from pdfminer.high_level import extract_pages
+from pdfminer.layout import LTTextContainer
 
-def extract_text(pdf_file: str): 
-    reader = PyPDF2.PdfReader(pdf_file)  # create a reader of pdf file object
-    text = ""
-    for page in reader.pages:  # loop over all pages of pdf
-        text += page.extract_text()  # extract text
-    text = text.replace(" ", "")
-
-    return text
-
-
-def search_keywords(keyword: str, text: str):
-    special_symbols = [".", "\n", ":", "-", ";", ",", "!", "?", "^"]
-    for symbol in special_symbols:
-        text = (" "+text).lower().replace(symbol, " ")
-        keyword = keyword.lower().replace(symbol, " ")
-    return text.count(keyword)  # search for keyword in the text
-
+"""
+excel functions:
+load keywords from A column
+set new excel table column sizes
+"""
 
 def load_keys(xlsx_file: str):
     wb = openpyxl.load_workbook(xlsx_file)  # load excel table
@@ -34,10 +26,15 @@ def load_keys(xlsx_file: str):
     wb.close()
     return keys
 
-
 def set_size(xlsx_file: str):
-    wb = openpyxl.load_workbook(xlsx_file)  # load excel table
+    wb = openpyxl.load_workbook(xlsx_file)
     ws = wb.worksheets[0]
+
+    def as_text(value):
+        if value is None:
+            return ""
+        return str(value)
+
     for column_cells in ws.columns:
         length = max(len(as_text(cell.value)) for cell in column_cells)
         ws.column_dimensions[openpyxl.utils.get_column_letter(
@@ -48,44 +45,73 @@ def set_size(xlsx_file: str):
     wb.save(xlsx_file)
     wb.close()
 
+"""
+pdf functions:
+read a pdf file
+format read text
+search for a keywoard in the text
+"""
 
-def as_text(value):
-    if value is None:
-        return ""
-    return str(value)
+def get_text(file):
+    text = ""
+    for page in extract_pages(file):
+        for element in page:
+            if isinstance(element, LTTextContainer): # element is text
+                text += element.get_text() 
+        text += "\n"
+    return text
 
+special_symbols = [".", "\n", ":", "-", ";", ",", "!", "?", "^"]
 
-pdf_files = []
+def prepare_text(text: str) -> tuple:
+    text = text.lower()
+    for symbol in special_symbols:
+        text = text.replace(symbol, " ")
+    words = text.split()
+    text = ""
+    for word in words:
+        text += word + " "
+    return (text, words)
+    
 
-# inputs of data
-keys_path = input("Path to .xlsx file with keywords: ")
-save_path = input("Path to .xlsx file to save analysis: ")
+def search_keywords(keyword: str, text_res: tuple):
+    for symbol in special_symbols:
+        keyword = keyword.lower().replace(symbol, " ")
 
+    text_str = text_res[0]
+    text = text_res[1]
+    if keyword.count(' ') == 0:
+        return text.count(keyword)
+    else:
+        return text_str.count(keyword)
 
-while (path := input("Path to pdf file/directory ([-] to start analyze): ")) != "-":
-    if os.path.isfile(path) and path.endswith(".pdf"):
-        pdf_files.append(path)
-    elif os.path.isdir(path):
-        pdfs = [os.path.join(path, i) for i in os.listdir(path) if i.endswith(
-            ".pdf")]  # loop over all files and find only pdf
-        pdf_files += pdfs
+    
+    
 
-pdf_files = list(dict.fromkeys(pdf_files))
+"""
+pdf files handling functions:
+load all pdf files as a list of paths
+"""
+def load_pdfs():
+    pdf_files = []
+    while (path := input("Path to pdf file/directory ([-] to start analyze): ")) != "-":
+        if os.path.isfile(path) and path.endswith(".pdf"):
+            pdf_files.append(path)
+        elif os.path.isdir(path):
+            # loop over all files and find only pdf
+            pdfs = [os.path.join(path, i) for i in os.listdir(path) if i.endswith(".pdf")]  
+            pdf_files += pdfs
+    return list(dict.fromkeys(pdf_files))
 
-keywords = load_keys(keys_path)
-data = {
-    "keyword": keywords
-}
-all_keywords = []
-file_key_count = []
-for file in pdf_files:  # loop over all pdf files provided
+def process_pdf(file):
     print(f"Processing file: {file}")
     short_file = file.split("\\")[-1]
     keywords_found = []
+    text_data = prepare_text(get_text(file))
+
     for key in keywords:  # search keywords in every file
-        print(f"Searching keyword: {key}")
-        text = extract_text(file)
-        result = search_keywords(key, text)
+        print(f"Searching keyword: {key}")  
+        result = search_keywords(key, text_data)
         if result > 0:
             keywords_found.append(key)
             file_key_count.append([short_file, key, result])
@@ -94,18 +120,42 @@ for file in pdf_files:  # loop over all pdf files provided
         else:
             data[short_file] = [result]
         if result == 0:
-            file_key_count.append([short_file, key, result])
+            file_key_count.append([short_file, key, result])                
 
     data[short_file].append("; ".join(keywords_found))
     all_keywords.extend(keywords_found)
+
+"""
+main script body
+"""
+
+version = "1.4.0"
+print(f"Developed by xymoget. Version {version}\nxymoget@gmail.com")
+
+keys_path = input("Path to .xlsx file with keywords: ")
+save_path = input("Path to .xlsx file to save analysis: ")
+
+pdf_files = load_pdfs()
+keywords = load_keys(keys_path)
+
+data = {
+    "keyword": keywords
+}
+
+all_keywords = []
+file_key_count = []
+
+for file in pdf_files:  # loop over all pdf files provided
+    process_pdf(file)
 
 data["keyword"].append("Keywords found")
 data["keyword"].append("Total")
 data["keyword"].append("Total per single keyword")
 data["conclusion"] = []
 print("Summing up...")
+
 # find files where keywords were used
-for i in range(len(data["keyword"])-3):
+for i in range(len(data["keyword"]) - 3):
     counter = 0
     files = []
     for key in data.keys():
@@ -132,20 +182,10 @@ for key in data:
     data[key][-3] = data[key][-1]
     data[key][-1] = temp
 
-
 df = pd.DataFrame(data)  # turn dictionary into dataframe object
 
 # this is a list of all rows need to be styled as bold and centered.
 styled_rows = []
-
-
-""" 
-basically, we have a variable "file_key_count" and it contains filename, keyword that's found in the file, 
-and how many times the keyword is present.
-it looks like this: [['A.pdf', 'key', 2], ['B.pdf', 'key_1', 0]] and so on.
-all the calculations are done using this info. 
-"""
-
 
 # first ranking.
 def keywords_found_ranking():
@@ -187,8 +227,7 @@ def keywords_found_ranking():
         # column A
         # append data to the A column. each result is in different line.
         files_with_count = grouped_files[count]
-        column_A.append(f"PDF file(s) ({len(files_with_count)}) with {
-                        count} keyword(s):")
+        column_A.append(f"PDF file(s) ({len(files_with_count)}) with {count} keyword(s):")
         i += 1
         styled_rows.append(startrow+i)
         for file in files_with_count:
@@ -198,8 +237,7 @@ def keywords_found_ranking():
 
         # column B
         # append data to the B column. result is one line, separated by the semicolon.
-        column_B.append(f"PDF file(s) ({len(files_with_count)}) with {
-                        count} keyword(s):")
+        column_B.append(f"PDF file(s) ({len(files_with_count)}) with {count} keyword(s):")
         column_B.append("; ".join([f"{file}" for file in files_with_count]))
         for _ in range(len(column_A)-len(column_B)):
             # adding blank spaces to remaining lines, because column B has to be the same length as column A.
@@ -215,7 +253,6 @@ keywords_found_ranking = {
     'PDF files ranking by number of keywords found ': result[1],
 }
 keywords_found_rankings_df = pd.DataFrame(keywords_found_ranking)
-
 
 # second ranking
 def frequency_ranking() -> list:
@@ -247,8 +284,7 @@ def frequency_ranking() -> list:
     for keyword_count, files in sorted(sorted_files.items(), reverse=True):
 
         # column A
-        column_A.append(f"PDF file(s) ({len(files)}) with frequency of {
-                        keyword_count}:")
+        column_A.append(f"PDF file(s) ({len(files)}) with frequency of {keyword_count}:")
         i += 1
         styled_rows.append(startrow+i)
         for item in files:
@@ -256,8 +292,7 @@ def frequency_ranking() -> list:
             i += 1
 
         # column B
-        column_B.append(f"PDF file(s) ({len(files)}) with frequency of {
-                        keyword_count}:")
+        column_B.append(f"PDF file(s) ({len(files)}) with frequency of {keyword_count}:")
         column_B.append(f"{'; '.join(files)}")
         for _ in range(len(column_A)-len(column_B)):
             column_B.append('')
@@ -309,8 +344,7 @@ def ranking_by_keyword_occurence() -> list:
     for count, keywords in sorted_keyword_count.items():
 
         # column A
-        column_A.append(f"Keyword(s) ({len(keywords)}) found across {
-                        count} PDF file(s):")
+        column_A.append(f"Keyword(s) ({len(keywords)}) found across {count} PDF file(s):")
         i += 1
         styled_rows.append(startrow+i)
         for item in keywords:
@@ -318,8 +352,7 @@ def ranking_by_keyword_occurence() -> list:
             i += 1
 
         # column B
-        column_B.append(f"Keyword(s) ({len(keywords)}) found across {
-                        count} PDF file(s):")
+        column_B.append(f"Keyword(s) ({len(keywords)}) found across {count} PDF file(s):")
         column_B.append(f"{'; '.join(keywords)}")
         for _ in range(len(column_A)-len(column_B)):
             column_B.append('')
@@ -332,7 +365,6 @@ occurence_rankings = {
     'Keywords ranking by number of PDF(s) match': result[0],
     'Keywords ranking by number of PDF(s) match ': result[1]}
 keyword_occurence_rankings_df = pd.DataFrame(occurence_rankings)
-
 
 # fourth ranking
 def ranking_keywords_by_freq():
@@ -393,7 +425,6 @@ keyword_frequency_rankings_df = pd.DataFrame(keyword_freq_ranking)
 
 
 with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
-
     # calculating startrow for each dataframe
     first_ranking_startrow = len(df.index) + 3
     second_ranking_startrow = len(
@@ -421,16 +452,17 @@ with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
     left_aligned = workbook.add_format({'align': 'left'})
     # apply style to the last column in first dataframe.
     worksheet.set_column(
-        len(df.columns)-2, len(df.columns)-1, None, left_aligned)
+        len(df.columns)-2, len(df.columns) - 1, None, left_aligned)
 
     # bold centered style
     bold_centered = workbook.add_format({'bold': True, 'align': 'center'})
     # apply style for each line that has to be styled as bold and centered
     for item in styled_rows:
-        worksheet.set_row(item-1, None, bold_centered)
+        worksheet.set_row(item - 1, None, bold_centered)
 
 set_size(save_path)
+
 print(f"Results are saved to {save_path}")
 print(df)
-print(f"Check {save_path} to see full results")
+print(f"Check {save_path} to see full results (press enter to finish the program)")
 input()
